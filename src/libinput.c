@@ -68,6 +68,8 @@
    do the scaling it usually does.
  */
 #define TOUCH_AXIS_MAX           0xffff
+
+#define TABLET_AXIS_RES             100
 #define TABLET_AXIS_PRESSURE_MAX   2048
 #define TABLET_AXIS_TILT_MIN        -64
 #define TABLET_AXIS_TILT_MAX         63
@@ -123,6 +125,11 @@ struct xf86libinput {
 	InputInfoPtr tablet_cursor_subdevice;
 	enum xf86libinput_tablet_type tablet_type;
 	enum xf86libinput_tablet_type current_tool;
+
+	struct {
+		double x;
+		double y;
+	} size;
 };
 
 /*
@@ -633,7 +640,7 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 	unsigned char btnmap[MAX_BUTTONS + 1];
 	Atom btnlabels[MAX_BUTTONS];
 	Atom axislabels[TABLET_NUM_AXES];
-	int nbuttons;
+	int nbuttons, res;
 	char *type;
 
 	type = xf86SetStrOption(pInfo->options, "Tablet Type", NULL);
@@ -648,6 +655,11 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 		driver_data->tablet_type = XF86LIBINPUT_TABLET_CURSOR;
 
 	free(type);
+
+	if (libinput_device_get_size(driver_data->device,
+				     &driver_data->size.x,
+				     &driver_data->size.y))
+		return;
 
 	init_button_map(btnmap, ARRAY_SIZE(btnmap));
 	init_button_labels(btnlabels, ARRAY_SIZE(btnlabels));
@@ -668,12 +680,17 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 
 	InitProximityClassDeviceStruct(dev);
 
+	/* libinput provides units in mm, X wants in m */
+	res = TABLET_AXIS_RES * 1000;
+
 	xf86InitValuatorAxisStruct(dev, 0,
 			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_X),
-				   0, TOUCH_AXIS_MAX, 0, 0, 0, Absolute);
+				   0, driver_data->size.x * TABLET_AXIS_RES,
+				   res, 0, res, Absolute);
 	xf86InitValuatorAxisStruct(dev, 1,
 			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_Y),
-				   0, TOUCH_AXIS_MAX, 0, 0, 0, Absolute);
+				   0, driver_data->size.y * TABLET_AXIS_RES,
+				   res, 0, res, Absolute);
 	xf86InitValuatorAxisStruct(dev, 2,
 			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_PRESSURE),
 				   0, TABLET_AXIS_PRESSURE_MAX, 1, 0, 1, Absolute);
@@ -930,8 +947,8 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 
 	tool = libinput_event_tablet_get_tool(event);
 
-	x = libinput_event_tablet_get_x_transformed(event, TOUCH_AXIS_MAX);
-	y = libinput_event_tablet_get_y_transformed(event, TOUCH_AXIS_MAX);
+	x = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_X);
+	y = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_Y);
 	pressure = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_PRESSURE);
 	tiltx = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_X);
 	tilty = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_Y);
@@ -941,6 +958,8 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 	else
 		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z) / 360.;
 
+	x *= TABLET_AXIS_RES;
+	y *= TABLET_AXIS_RES;
 	pressure = xf86libinput_scale_axis(pressure, 0, TABLET_AXIS_PRESSURE_MAX);
 	tiltx = xf86libinput_scale_axis(tiltx, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
 	tilty = xf86libinput_scale_axis(tilty, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
@@ -966,9 +985,6 @@ xf86libinput_handle_tablet_proximity(InputInfoPtr pInfo,
 	enum libinput_tool_proximity_state state;
 
 	switch (libinput_tool_get_type(tool)) {
-	case LIBINPUT_TOOL_NONE:
-		driver_data->current_tool = XF86LIBINPUT_TABLET_NONE;
-		return;
 	case LIBINPUT_TOOL_PEN:
 	case LIBINPUT_TOOL_BRUSH:
 	case LIBINPUT_TOOL_PENCIL:
