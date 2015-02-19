@@ -51,13 +51,29 @@
 #define TOUCH_MAX_SLOTS 15
 #define XORG_KEYCODE_OFFSET 8
 
+/* Tablet axes:
+ * - X
+ * - Y
+ * - Pressure
+ * - Tilt X
+ * - Tilt Y
+ * - Rotation / Slider
+ */
+#define TABLET_NUM_AXES 6
+
 /*
    libinput does not provide axis information for absolute devices, instead
    it scales into the screen dimensions provided. So we set up the axes with
    a fixed range, let libinput scale into that range and then the server
    do the scaling it usually does.
  */
-#define TOUCH_AXIS_MAX 0xffff
+#define TOUCH_AXIS_MAX           0xffff
+#define TABLET_AXIS_PRESSURE_MAX   2048
+#define TABLET_AXIS_TILT_MIN        -64
+#define TABLET_AXIS_TILT_MAX         63
+#define TABLET_AXIS_TILT_RES         57
+#define TABLET_AXIS_WHEEL_MIN      -900
+#define TABLET_AXIS_WHEEL_MAX       899
 
 struct xf86libinput_driver {
 	struct libinput *libinput;
@@ -66,6 +82,13 @@ struct xf86libinput_driver {
 };
 
 static struct xf86libinput_driver driver_context;
+
+enum xf86libinput_tablet_type {
+	XF86LIBINPUT_TABLET_NONE = -1,
+	XF86LIBINPUT_TABLET_STYLUS,
+	XF86LIBINPUT_TABLET_ERASER,
+	XF86LIBINPUT_TABLET_CURSOR,
+};
 
 struct xf86libinput {
 	char *path;
@@ -98,6 +121,8 @@ struct xf86libinput {
 
 	InputInfoPtr tablet_eraser_subdevice;
 	InputInfoPtr tablet_cursor_subdevice;
+	enum xf86libinput_tablet_type tablet_type;
+	enum xf86libinput_tablet_type current_tool;
 };
 
 /*
@@ -184,6 +209,9 @@ btn_linux2xorg(unsigned int b)
 	case BTN_LEFT: button = 1; break;
 	case BTN_MIDDLE: button = 2; break;
 	case BTN_RIGHT: button = 3; break;
+	case BTN_TOUCH: button = 1; break;
+	case BTN_STYLUS: button = 2; break;
+	case BTN_STYLUS2: button = 3; break;
 	default:
 		button = 8 + b - BTN_SIDE;
 		break;
@@ -597,6 +625,73 @@ xf86libinput_init_touch(InputInfoPtr pInfo)
 
 }
 
+static void
+xf86libinput_init_tablet(InputInfoPtr pInfo)
+{
+	struct xf86libinput *driver_data = pInfo->private;
+	DeviceIntPtr dev = pInfo->dev;
+	unsigned char btnmap[MAX_BUTTONS + 1];
+	Atom btnlabels[MAX_BUTTONS];
+	Atom axislabels[TABLET_NUM_AXES];
+	int nbuttons;
+	char *type;
+
+	type = xf86SetStrOption(pInfo->options, "Tablet Type", NULL);
+
+	xf86IDrvMsg(pInfo, X_INFO, "will initialize a tablet of type %s, some day\n", type);
+
+	if (!strcmp(type, "Stylus"))
+		driver_data->tablet_type = XF86LIBINPUT_TABLET_STYLUS;
+	else if (!strcmp(type, "Eraser"))
+		driver_data->tablet_type = XF86LIBINPUT_TABLET_ERASER;
+	else if (!strcmp(type, "Cursor"))
+		driver_data->tablet_type = XF86LIBINPUT_TABLET_CURSOR;
+
+	free(type);
+
+	init_button_map(btnmap, ARRAY_SIZE(btnmap));
+	init_button_labels(btnlabels, ARRAY_SIZE(btnlabels));
+	init_axis_labels(axislabels, ARRAY_SIZE(axislabels));
+
+	nbuttons = 3;
+
+	InitButtonClassDeviceStruct(dev,
+				    nbuttons,
+				    btnlabels,
+				    btnmap);
+
+	InitValuatorClassDeviceStruct(dev,
+				      TABLET_NUM_AXES,
+				      axislabels,
+				      GetMotionHistorySize(),
+				      Absolute);
+
+	InitProximityClassDeviceStruct(dev);
+
+	xf86InitValuatorAxisStruct(dev, 0,
+			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_X),
+				   0, TOUCH_AXIS_MAX, 0, 0, 0, Absolute);
+	xf86InitValuatorAxisStruct(dev, 1,
+			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_Y),
+				   0, TOUCH_AXIS_MAX, 0, 0, 0, Absolute);
+	xf86InitValuatorAxisStruct(dev, 2,
+			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_PRESSURE),
+				   0, TABLET_AXIS_PRESSURE_MAX, 1, 0, 1, Absolute);
+	xf86InitValuatorAxisStruct(dev, 3,
+			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_TILT_X),
+				   TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX,
+				   TABLET_AXIS_TILT_RES, 0, TABLET_AXIS_TILT_RES, Absolute);
+	xf86InitValuatorAxisStruct(dev, 4,
+			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_TILT_Y),
+				   TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX,
+				   TABLET_AXIS_TILT_RES, 0, TABLET_AXIS_TILT_RES, Absolute);
+	xf86InitValuatorAxisStruct(dev, 5,
+			           XIGetKnownProperty(AXIS_LABEL_PROP_ABS_WHEEL),
+				   TABLET_AXIS_WHEEL_MIN, TABLET_AXIS_WHEEL_MAX,
+				   1, 0, 1, Absolute);
+
+}
+
 static int
 xf86libinput_init(DeviceIntPtr dev)
 {
@@ -616,6 +711,8 @@ xf86libinput_init(DeviceIntPtr dev)
 	}
 	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_TOUCH))
 		xf86libinput_init_touch(pInfo);
+	if (libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_TABLET))
+		xf86libinput_init_tablet(pInfo);
 
 	/* unref the device now, because we'll get a new ref during
 	   DEVICE_ON */
@@ -805,6 +902,125 @@ xf86libinput_handle_touch(InputInfoPtr pInfo,
 	xf86PostTouchEvent(dev, touchids[slot], type, 0, m);
 }
 
+static inline int
+xf86libinput_tablet_is_current_tool(InputInfoPtr pInfo)
+{
+	struct xf86libinput *driver_data = pInfo->private;
+	return driver_data->tablet_type == driver_data->current_tool;
+}
+
+static double
+xf86libinput_scale_axis(double value, double min, double max)
+{
+	return value * (max - min) + min;
+}
+
+static void
+xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
+				struct libinput_event_tablet *event)
+{
+	DeviceIntPtr dev = pInfo->dev;
+	struct xf86libinput *driver_data = pInfo->private;
+	struct libinput_tool *tool;
+	ValuatorMask *mask = driver_data->valuators;
+	double x, y, pressure, tiltx, tilty, wheel;
+
+	if (!xf86libinput_tablet_is_current_tool(pInfo))
+		return;
+
+	tool = libinput_event_tablet_get_tool(event);
+
+	x = libinput_event_tablet_get_x_transformed(event, TOUCH_AXIS_MAX);
+	y = libinput_event_tablet_get_y_transformed(event, TOUCH_AXIS_MAX);
+	pressure = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_PRESSURE);
+	tiltx = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_X);
+	tilty = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_Y);
+
+	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_SLIDER))
+		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_SLIDER);
+	else
+		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z) / 360.;
+
+	pressure = xf86libinput_scale_axis(pressure, 0, TABLET_AXIS_PRESSURE_MAX);
+	tiltx = xf86libinput_scale_axis(tiltx, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
+	tilty = xf86libinput_scale_axis(tilty, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
+	wheel = xf86libinput_scale_axis(wheel, TABLET_AXIS_WHEEL_MIN, TABLET_AXIS_WHEEL_MAX);
+
+	valuator_mask_zero(mask);
+	valuator_mask_set_double(mask, 0, x);
+	valuator_mask_set_double(mask, 1, y);
+	valuator_mask_set_double(mask, 2, pressure);
+	valuator_mask_set_double(mask, 3, tiltx);
+	valuator_mask_set_double(mask, 4, tilty);
+	valuator_mask_set_double(mask, 5, wheel);
+
+	xf86PostMotionEventM(dev, Absolute, mask);
+}
+
+static void
+xf86libinput_handle_tablet_proximity(InputInfoPtr pInfo,
+			   struct libinput_event_tablet *event)
+{
+	struct xf86libinput *driver_data = pInfo->private;
+	struct libinput_tool *tool = libinput_event_tablet_get_tool(event);
+	enum libinput_tool_proximity_state state;
+
+	switch (libinput_tool_get_type(tool)) {
+	case LIBINPUT_TOOL_NONE:
+		driver_data->current_tool = XF86LIBINPUT_TABLET_NONE;
+		return;
+	case LIBINPUT_TOOL_PEN:
+	case LIBINPUT_TOOL_BRUSH:
+	case LIBINPUT_TOOL_PENCIL:
+	case LIBINPUT_TOOL_AIRBRUSH:
+		driver_data->current_tool = XF86LIBINPUT_TABLET_STYLUS;
+		break;
+	case LIBINPUT_TOOL_ERASER:
+		driver_data->current_tool = XF86LIBINPUT_TABLET_ERASER;
+		break;
+	case LIBINPUT_TOOL_MOUSE:
+	case LIBINPUT_TOOL_LENS:
+		driver_data->current_tool = XF86LIBINPUT_TABLET_CURSOR;
+		break;
+	default:
+		return;
+	}
+
+	if (!xf86libinput_tablet_is_current_tool(pInfo))
+		return;
+
+	state = libinput_event_tablet_get_proximity_state(event);
+
+	if (state == LIBINPUT_TOOL_PROXIMITY_OUT) {
+		driver_data->current_tool = XF86LIBINPUT_TABLET_NONE;
+		xf86IDrvMsg(pInfo, X_INFO, "tablet proximity OUT event\n");
+		return;
+	}
+
+	xf86IDrvMsg(pInfo, X_INFO, "tablet proximity IN event\n");
+}
+
+static void
+xf86libinput_handle_tablet_button(InputInfoPtr pInfo,
+			   struct libinput_event_tablet *event)
+{
+	enum libinput_button_state state;
+	DeviceIntPtr dev = pInfo->dev;
+	int button;
+	int is_press;
+
+	if (!xf86libinput_tablet_is_current_tool(pInfo))
+		return;
+
+	button = btn_linux2xorg(libinput_event_tablet_get_button(event));
+	state = libinput_event_tablet_get_button_state(event);
+	is_press = state == LIBINPUT_BUTTON_STATE_PRESSED;
+
+	xf86IDrvMsg(pInfo, X_INFO, "Button %d %s\n", button, is_press ? "pressed" : "released");
+
+	xf86PostButtonEvent(dev, Absolute, button, is_press, 0, 0);
+}
+
 static void
 xf86libinput_handle_event(struct libinput_event *event)
 {
@@ -852,6 +1068,18 @@ xf86libinput_handle_event(struct libinput_event *event)
 			xf86libinput_handle_touch(pInfo,
 						  libinput_event_get_touch_event(event),
 						  libinput_event_get_type(event));
+			break;
+		case LIBINPUT_EVENT_TABLET_AXIS:
+			xf86libinput_handle_tablet_axis(pInfo,
+							libinput_event_get_tablet_event(event));
+			break;
+		case LIBINPUT_EVENT_TABLET_PROXIMITY:
+			xf86libinput_handle_tablet_proximity(pInfo,
+							     libinput_event_get_tablet_event(event));
+			break;
+		case LIBINPUT_EVENT_TABLET_BUTTON:
+			xf86libinput_handle_tablet_button(pInfo,
+							  libinput_event_get_tablet_event(event));
 			break;
 	}
 }
