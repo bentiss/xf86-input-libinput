@@ -95,6 +95,9 @@ struct xf86libinput {
 		float matrix[9];
 		enum libinput_config_scroll_method scroll_method;
 	} options;
+
+	InputInfoPtr tablet_eraser_subdevice;
+	InputInfoPtr tablet_cursor_subdevice;
 };
 
 /*
@@ -1121,6 +1124,79 @@ xf86libinput_parse_options(InputInfoPtr pInfo,
 }
 
 static int
+xf86libinput_append_suffix(XF86OptionPtr optlist, const char *orig_name,
+			   const char *suffix)
+{
+	char *name = calloc((strlen(orig_name) + 1 + strlen(suffix)),
+			    sizeof(char));
+
+	if (!name)
+		return -ENOMEM;
+
+	sprintf(name, "%s %s", orig_name, suffix);
+	xf86ReplaceStrOption(optlist, "name", name);
+
+	free(name);
+	return 0;
+}
+
+static InputInfoPtr
+xf86libinput_create_subdevice(InputInfoPtr pInfo, const char *suffix) {
+	InputInfoPtr pSubdev;
+	DeviceIntPtr dev;
+	InputOption *input_options;
+
+	input_options = xf86OptionListDuplicate(pInfo->options);
+
+	xf86libinput_append_suffix(input_options, pInfo->name, suffix);
+
+	xf86ReplaceStrOption(input_options, "_source", "driver/libinput");
+	xf86ReplaceStrOption(input_options, "Tablet Type", suffix);
+
+	NewInputDeviceRequest(input_options, NULL, &dev);
+	pSubdev = dev->public.devicePrivate;
+
+	xf86OptionListFree(input_options);
+
+	return pSubdev;
+}
+
+static void
+xf86libinput_create_tablet_subdevices(InputInfoPtr pInfo)
+{
+	struct xf86libinput *driver_data = pInfo->private;
+	char *new_name;
+
+	xf86AddNewOption(pInfo->options, "Tablet Type", "Stylus");
+
+	driver_data->tablet_eraser_subdevice = xf86libinput_create_subdevice(pInfo, "Eraser");
+	driver_data->tablet_cursor_subdevice = xf86libinput_create_subdevice(pInfo, "Cursor");
+
+	xf86libinput_append_suffix(pInfo->options, pInfo->name, "Stylus");
+	new_name = strdup(xf86FindOptionValue(pInfo->options, "name"));
+	if (new_name) {
+		free(pInfo->name);
+		pInfo->name = new_name;
+	}
+
+}
+
+static int
+xf86libinput_is_subdevice(InputInfoPtr pInfo)
+{
+	char *source = xf86CheckStrOption(pInfo->options, "_source", "");
+	int rc;
+
+	if (!source)
+		return 0;
+
+	rc = !strcmp(source, "driver/libinput");
+
+	free(source);
+	return rc;
+}
+
+static int
 xf86libinput_pre_init(InputDriverPtr drv,
 		      InputInfoPtr pInfo,
 		      int flags)
@@ -1197,6 +1273,12 @@ xf86libinput_pre_init(InputDriverPtr drv,
 
 	xf86libinput_parse_options(pInfo, driver_data, device);
 
+	/* tablets need sub-devices for cursor and eraser */
+	if (libinput_device_has_capability(device,
+					   LIBINPUT_DEVICE_CAP_TABLET) &&
+	    !xf86libinput_is_subdevice(pInfo))
+		xf86libinput_create_tablet_subdevices(pInfo);
+
 	/* now pick an actual type */
 	if (libinput_device_config_tap_get_finger_count(device) > 0)
 		pInfo->type_name = XI_TOUCHPAD;
@@ -1206,6 +1288,9 @@ xf86libinput_pre_init(InputDriverPtr drv,
 	else if (libinput_device_has_capability(device,
 						LIBINPUT_DEVICE_CAP_POINTER))
 		pInfo->type_name = XI_MOUSE;
+	else if (libinput_device_has_capability(device,
+						LIBINPUT_DEVICE_CAP_TABLET))
+		pInfo->type_name = XI_TABLET;
 	else
 		pInfo->type_name = XI_KEYBOARD;
 
