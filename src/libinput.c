@@ -953,10 +953,20 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 	tiltx = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_X);
 	tilty = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_Y);
 
-	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_SLIDER))
+	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_SLIDER)) {
 		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_SLIDER);
-	else
-		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z) / 360.;
+	} else {
+		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z);
+
+		/* libwacom has a 0 North up, the legacy xorg-wacom expects it
+		 * to be East facing*/
+
+		wheel -= 90;
+		if (wheel < 0)
+			wheel += 360;
+
+		wheel /= 360.0;
+	}
 
 	x *= TABLET_AXIS_RES;
 	y *= TABLET_AXIS_RES;
