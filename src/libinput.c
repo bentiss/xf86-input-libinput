@@ -949,39 +949,52 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 
 	x = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_X);
 	y = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_Y);
-	pressure = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_PRESSURE);
-	tiltx = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_X);
-	tilty = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_Y);
-
-	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_SLIDER)) {
-		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_SLIDER);
-	} else {
-		wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z);
-
-		/* libwacom has a 0 North up, the legacy xorg-wacom expects it
-		 * to be East facing*/
-
-		wheel -= 90;
-		if (wheel < 0)
-			wheel += 360;
-
-		wheel /= 360.0;
-	}
 
 	x *= TABLET_AXIS_RES;
 	y *= TABLET_AXIS_RES;
-	pressure = xf86libinput_scale_axis(pressure, 0, TABLET_AXIS_PRESSURE_MAX);
-	tiltx = xf86libinput_scale_axis(tiltx, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
-	tilty = xf86libinput_scale_axis(tilty, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
-	wheel = xf86libinput_scale_axis(wheel, TABLET_AXIS_WHEEL_MIN, TABLET_AXIS_WHEEL_MAX);
 
 	valuator_mask_zero(mask);
 	valuator_mask_set_double(mask, 0, x);
 	valuator_mask_set_double(mask, 1, y);
-	valuator_mask_set_double(mask, 2, pressure);
-	valuator_mask_set_double(mask, 3, tiltx);
-	valuator_mask_set_double(mask, 4, tilty);
-	valuator_mask_set_double(mask, 5, wheel);
+
+	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_PRESSURE)) {
+		pressure = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_PRESSURE);
+		pressure = xf86libinput_scale_axis(pressure, 0, TABLET_AXIS_PRESSURE_MAX);
+		valuator_mask_set_double(mask, 2, pressure);
+	}
+
+	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_TILT_X)) {
+		tiltx = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_X);
+		tiltx = xf86libinput_scale_axis(tiltx, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
+		valuator_mask_set_double(mask, 3, tiltx);
+	}
+
+	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_TILT_Y)) {
+		tilty = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_Y);
+		tilty = xf86libinput_scale_axis(tilty, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
+		valuator_mask_set_double(mask, 4, tilty);
+	}
+
+	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_SLIDER) ||
+	    libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_ROTATION_Z)) {
+		if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_ROTATION_Z)) {
+			wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z);
+
+			/* libwacom has a 0 North up, the legacy xorg-wacom expects it
+			 * to be East facing*/
+
+			wheel -= 90;
+			if (wheel < 0)
+				wheel += 360;
+
+			wheel /= 360.0;
+		} else {
+			wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_SLIDER);
+		}
+
+		wheel = xf86libinput_scale_axis(wheel, TABLET_AXIS_WHEEL_MIN, TABLET_AXIS_WHEEL_MAX);
+		valuator_mask_set_double(mask, 5, wheel);
+	}
 
 	xf86PostMotionEventM(dev, Absolute, mask);
 }
