@@ -932,6 +932,14 @@ xf86libinput_scale_axis(double value, double min, double max)
 	return value * (max - min) + min;
 }
 
+static inline int
+xf86libinput_tool_axis_has_changed(struct libinput_event_tablet *event,
+		struct libinput_tool *tool, enum libinput_tablet_axis axis)
+{
+	return libinput_tool_has_axis(tool, axis) &&
+		libinput_event_tablet_axis_has_changed(event, axis);
+}
+
 static void
 xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 				struct libinput_event_tablet *event)
@@ -954,29 +962,37 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 	y *= TABLET_AXIS_RES;
 
 	valuator_mask_zero(mask);
-	valuator_mask_set_double(mask, 0, x);
-	valuator_mask_set_double(mask, 1, y);
 
-	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_PRESSURE)) {
+	if (libinput_event_tablet_axis_has_changed(event, LIBINPUT_TABLET_AXIS_X))
+		valuator_mask_set_double(mask, 0, x);
+	if (libinput_event_tablet_axis_has_changed(event, LIBINPUT_TABLET_AXIS_Y))
+		valuator_mask_set_double(mask, 1, y);
+
+	if (xf86libinput_tool_axis_has_changed(event, tool,
+					       LIBINPUT_TABLET_AXIS_PRESSURE)) {
 		pressure = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_PRESSURE);
 		pressure = xf86libinput_scale_axis(pressure, 0, TABLET_AXIS_PRESSURE_MAX);
 		valuator_mask_set_double(mask, 2, pressure);
 	}
 
-	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_TILT_X)) {
+	if (xf86libinput_tool_axis_has_changed(event, tool,
+					       LIBINPUT_TABLET_AXIS_TILT_X)) {
 		tiltx = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_X);
 		tiltx = xf86libinput_scale_axis(tiltx, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
 		valuator_mask_set_double(mask, 3, tiltx);
 	}
 
-	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_TILT_Y)) {
+	if (xf86libinput_tool_axis_has_changed(event, tool,
+					       LIBINPUT_TABLET_AXIS_TILT_Y)) {
 		tilty = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_TILT_Y);
 		tilty = xf86libinput_scale_axis(tilty, TABLET_AXIS_TILT_MIN, TABLET_AXIS_TILT_MAX);
 		valuator_mask_set_double(mask, 4, tilty);
 	}
 
-	if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_SLIDER) ||
-	    libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_ROTATION_Z)) {
+	if (xf86libinput_tool_axis_has_changed(event, tool,
+					       LIBINPUT_TABLET_AXIS_SLIDER) ||
+	    xf86libinput_tool_axis_has_changed(event, tool,
+					       LIBINPUT_TABLET_AXIS_ROTATION_Z)) {
 		if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_ROTATION_Z)) {
 			wheel = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_ROTATION_Z);
 
