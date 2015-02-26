@@ -58,8 +58,9 @@
  * - Tilt X
  * - Tilt Y
  * - Rotation / Slider
+ * - Vertical Scroll wheel
  */
-#define TABLET_NUM_AXES 6
+#define TABLET_NUM_AXES 7
 
 /*
    libinput does not provide axis information for absolute devices, instead
@@ -707,6 +708,8 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 				   TABLET_AXIS_WHEEL_MIN, TABLET_AXIS_WHEEL_MAX,
 				   1, 0, 1, Absolute);
 
+	SetScrollValuator(dev, 6, SCROLL_TYPE_VERTICAL, -1, 0);
+
 }
 
 static int
@@ -1013,6 +1016,16 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 	}
 
 	xf86PostMotionEventM(dev, Absolute, mask);
+
+	valuator_mask_zero(mask);
+	if (xf86libinput_tool_axis_has_changed(event, tool,
+					       LIBINPUT_TABLET_AXIS_REL_WHEEL)) {
+		wheel = libinput_event_tablet_get_axis_delta_discrete(event,
+					LIBINPUT_TABLET_AXIS_REL_WHEEL);
+		valuator_mask_set_double(mask, 6, wheel);
+
+		xf86PostMotionEventM(dev, Relative, mask);
+	}
 }
 
 static void
