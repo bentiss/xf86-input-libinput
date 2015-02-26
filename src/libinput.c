@@ -77,6 +77,7 @@
 #define TABLET_AXIS_TILT_RES         57
 #define TABLET_AXIS_WHEEL_MIN      -900
 #define TABLET_AXIS_WHEEL_MAX       899
+#define TABLET_MAX_PROXOUT         0.50
 
 struct xf86libinput_driver {
 	struct libinput *libinput;
@@ -954,7 +955,8 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 	struct xf86libinput *driver_data = pInfo->private;
 	struct libinput_tool *tool;
 	ValuatorMask *mask = driver_data->valuators;
-	double x, y, pressure, tiltx, tilty, wheel;
+	double x, y, pressure, tiltx, tilty, wheel, distance;
+	int in_prox;
 
 	if (!xf86libinput_tablet_is_current_tool(pInfo))
 		return;
@@ -1024,26 +1026,35 @@ xf86libinput_handle_tablet_axis(InputInfoPtr pInfo,
 
 	if (driver_data->tablet_type == XF86LIBINPUT_TABLET_CURSOR) {
 		valuator_mask_zero(mask);
+		in_prox = 1;
 
-		if (libinput_event_tablet_axis_has_changed(event, LIBINPUT_TABLET_AXIS_X)) {
-			x = libinput_event_tablet_get_axis_delta(event, LIBINPUT_TABLET_AXIS_X);
-			x *= TABLET_AXIS_RES;
-			valuator_mask_set_double(mask, 0, x);
-		}
-		if (libinput_event_tablet_axis_has_changed(event, LIBINPUT_TABLET_AXIS_Y)) {
-			y = libinput_event_tablet_get_axis_delta(event, LIBINPUT_TABLET_AXIS_Y);
-			y *= TABLET_AXIS_RES;
-			valuator_mask_set_double(mask, 1, y);
+		if (libinput_tool_has_axis(tool, LIBINPUT_TABLET_AXIS_DISTANCE)) {
+			distance = libinput_event_tablet_get_axis_value(event, LIBINPUT_TABLET_AXIS_DISTANCE);
+			if (distance > TABLET_MAX_PROXOUT)
+				in_prox = 0;
 		}
 
-		if (xf86libinput_tool_axis_has_changed(event, tool,
-						       LIBINPUT_TABLET_AXIS_REL_WHEEL)) {
-			wheel = libinput_event_tablet_get_axis_delta_discrete(event,
-						LIBINPUT_TABLET_AXIS_REL_WHEEL);
-			valuator_mask_set_double(mask, 6, wheel);
-		}
+		if (in_prox) {
+			if (libinput_event_tablet_axis_has_changed(event, LIBINPUT_TABLET_AXIS_X)) {
+				x = libinput_event_tablet_get_axis_delta(event, LIBINPUT_TABLET_AXIS_X);
+				x *= TABLET_AXIS_RES;
+				valuator_mask_set_double(mask, 0, x);
+			}
+			if (libinput_event_tablet_axis_has_changed(event, LIBINPUT_TABLET_AXIS_Y)) {
+				y = libinput_event_tablet_get_axis_delta(event, LIBINPUT_TABLET_AXIS_Y);
+				y *= TABLET_AXIS_RES;
+				valuator_mask_set_double(mask, 1, y);
+			}
 
-		xf86PostMotionEventM(dev, Relative, mask);
+			if (xf86libinput_tool_axis_has_changed(event, tool,
+							       LIBINPUT_TABLET_AXIS_REL_WHEEL)) {
+				wheel = libinput_event_tablet_get_axis_delta_discrete(event,
+							LIBINPUT_TABLET_AXIS_REL_WHEEL);
+				valuator_mask_set_double(mask, 6, wheel);
+			}
+
+			xf86PostMotionEventM(dev, Relative, mask);
+		}
 	}
 }
 
