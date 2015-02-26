@@ -58,7 +58,7 @@
  * - Tilt X
  * - Tilt Y
  * - Rotation / Slider
- * - Vertical Scroll wheel
+ * - Vertical Scroll wheel <= on the puck only
  */
 #define TABLET_NUM_AXES 7
 
@@ -641,7 +641,7 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 	unsigned char btnmap[MAX_BUTTONS + 1];
 	Atom btnlabels[MAX_BUTTONS];
 	Atom axislabels[TABLET_NUM_AXES];
-	int nbuttons, res;
+	int nbuttons, naxes, res;
 	char *type;
 
 	type = xf86SetStrOption(pInfo->options, "Tablet Type", NULL);
@@ -667,6 +667,9 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 	init_axis_labels(axislabels, ARRAY_SIZE(axislabels));
 
 	nbuttons = 3;
+	naxes = TABLET_NUM_AXES;
+	if (driver_data->tablet_type != XF86LIBINPUT_TABLET_CURSOR)
+		naxes--; /* remove the scroll wheel axis */
 
 	InitButtonClassDeviceStruct(dev,
 				    nbuttons,
@@ -674,7 +677,7 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 				    btnmap);
 
 	InitValuatorClassDeviceStruct(dev,
-				      TABLET_NUM_AXES,
+				      naxes,
 				      axislabels,
 				      GetMotionHistorySize(),
 				      Absolute);
@@ -708,8 +711,8 @@ xf86libinput_init_tablet(InputInfoPtr pInfo)
 				   TABLET_AXIS_WHEEL_MIN, TABLET_AXIS_WHEEL_MAX,
 				   1, 0, 1, Absolute);
 
-	SetScrollValuator(dev, 6, SCROLL_TYPE_VERTICAL, -1, 0);
-
+	if (driver_data->tablet_type == XF86LIBINPUT_TABLET_CURSOR)
+		SetScrollValuator(dev, 6, SCROLL_TYPE_VERTICAL, -1, 0);
 }
 
 static int
